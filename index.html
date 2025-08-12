@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ready Set Won — Jungwon Birthday Game</title>
+  <style>
+    /* Pixel font */
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+    :root{
+      --bg:#9be7a6; /* garden green */
+      --sky:#9be7ff;
+      --ground:#6bbf6b;
+      --accent:#ffdf5c;
+      --text:#0b2f1a;
+    }
+
+    html,body{height:100%;margin:0;font-family:'Press Start 2P', monospace;background:linear-gradient(180deg,var(--sky) 0%, var(--bg) 60%);}
+    .wrap{display:flex;align-items:center;justify-content:center;height:100%;}
+    .game-card{width:900px;max-width:95vw;background:linear-gradient(180deg, rgba(255,255,255,0.08), rgba(0,0,0,0.02));border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,0.12);}
+    header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    h1{margin:0;color:var(--text);font-size:18px}
+    .sub{font-size:10px;color:rgba(11,47,26,0.7)}
+
+    /* canvas container */
+    .viewport{background:linear-gradient(180deg,#9be7ff 0%, #c3ffd6 60%);border-radius:8px;padding:10px;}
+    canvas{display:block;background:linear-gradient(180deg,#9be7ff 0%, #d6fff0 60%);border-radius:6px;width:100%;height:auto;image-rendering:pixelated}
+
+    /* HUD */
+    .hud{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+    .score{font-size:12px;color:var(--text)}
+    .credits{font-size:10px;color:rgba(11,47,26,0.6)}
+
+    /* overlay */
+    .overlay{position:relative}
+    .start-overlay{position:absolute;left:10px;top:10px;right:10px;bottom:10px;display:flex;align-items:center;justify-content:center;backdrop-filter: blur(2px);}
+    .card{background:rgba(255,255,255,0.95);border-radius:10px;padding:18px;text-align:center;box-shadow:0 8px 20px rgba(0,0,0,0.08)}
+    .btn{display:inline-block;margin-top:10px;padding:10px 16px;border-radius:8px;background:var(--accent);cursor:pointer}
+    .small{font-size:10px}
+
+    /* responsive */
+    @media (max-width:600px){h1{font-size:12px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="game-card">
+      <header>
+        <div>
+          <h1>READY · SET · WON</h1>
+          <div class="sub">A colourful pixel garden runner for Jungwon — tap / space to jump</div>
+        </div>
+        <div class="sub small">Happy Birthday, Jungwon! 🌼</div>
+      </header>
+
+      <div class="viewport">
+        <div class="overlay">
+          <canvas id="game" width="900" height="200"></canvas>
+
+          <div id="startScreen" class="start-overlay">
+            <div class="card">
+              <div style="font-size:16px;margin-bottom:8px">READY · SET · WON</div>
+              <div class="small">Press SPACE or TAP to start — jump like the chrome dino!</div>
+              <div class="btn" id="startBtn">START</div>
+              <div class="small" style="margin-top:8px;color:#666">Pixel art, garden theme, Jungwon avatar</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hud">
+        <div class="score">SCORE: <span id="score">0</span></div>
+        <div class="credits">Made with ♥ for Jungwon</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// --------- Simple pixel runner game in canvas ---------
+// Controls: Space / Up arrow / Tap to jump
+// Save as ready-set-won.html and open in a browser.
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const SCALE = 3; // how many screen pixels per "game pixel"
+const G_WIDTH = Math.floor(canvas.width / SCALE);
+const G_HEIGHT = Math.floor(canvas.height / SCALE);
+
+// Game state
+let running = false;
+let score = 0;
+let speed = 2; // world speed
+let tick = 0;
+let obstacles = [];
+
+// Player (Jungwon avatar) — represented as small pixel art
+const player = {
+  x: 40,
+  y: G_HEIGHT - 22,
+  w: 8,
+  h: 14,
+  vy: 0,
+  grounded: true,
+  color: '#0b2f1a'
+}
+
+// Simple jump physics
+const GRAVITY = 0.6;
+const JUMP_V = -9;
+
+// Obstacles: simple flower pots and cactus-ish plants
+function spawnObstacle(){
+  const type = Math.random() < 0.6 ? 'pot' : 'bush';
+  const h = type === 'pot' ? 10 : 14;
+  obstacles.push({x: G_WIDTH + 20, y: G_HEIGHT - h - 6, w: type==='pot'?8:12, h, type});
+}
+
+// Pixel drawing helpers (game pixels scaled up)
+function fillPixel(gx, gy, gw, gh, color){
+  ctx.fillStyle = color;
+  ctx.fillRect(gx*SCALE, gy*SCALE, gw*SCALE, gh*SCALE);
+}
+
+function clear(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+}
+
+// Draw ground with some simple grass
+function drawGround(){
+  // ground strip
+  fillPixel(0, G_HEIGHT-6, G_WIDTH, 6, '#6bbf6b');
+  // decorative flowers
+  for(let i=0;i<10;i++){
+    const x = (i*40+((tick*speed)%40)) % G_WIDTH;
+    fillPixel(x, G_HEIGHT-8, 1,1, '#fff');
+    fillPixel(x+1, G_HEIGHT-8, 1,1, '#ff5c8d');
+  }
+}
+
+// Draw clouds
+function drawClouds(){
+  for(let i=0;i<3;i++){
+    const cx = (i*110 - (tick*0.3))% (G_WIDTH+40);
+    const cy = 20 + (i%2)*8;
+    fillPixel((cx+2)|0, cy+0, 8,1, '#ffffff');
+    fillPixel((cx+1)|0, cy+1, 10,1, '#ffffff');
+    fillPixel((cx+3)|0, cy+2, 6,1, '#ffffff');
+  }
+}
+
+// Draw player (simple pixel art with name label)
+function drawPlayer(){
+  const p = player;
+  // shadow
+  fillPixel(p.x+1, p.y + p.h, p.w, 1, 'rgba(0,0,0,0.18)');
+  // body (simple head + body)
+  // head
+  fillPixel(p.x+2, p.y+0, 4,4, '#ffdf5c'); // hair / cap
+  // face
+  fillPixel(p.x+2, p.y+4, 4,3, '#ffd8b6');
+  // body
+  fillPixel(p.x+1, p.y+7, 6,6, '#2d7a65');
+  // legs
+  fillPixel(p.x+1, p.y+13, 3,1, '#6b3b3b');
+  fillPixel(p.x+4, p.y+13, 3,1, '#6b3b3b');
+
+  // name label above head
+  const name = 'JUNGWON';
+  // draw small block letters manually (very small) - simpler: draw filled rect as banner and then use canvas text scaled up
+  ctx.save();
+  ctx.scale(SCALE, SCALE);
+  ctx.font = '6px "Press Start 2P"';
+  ctx.fillStyle = '#083018';
+  // text positioned in game pixel coords -> convert
+  ctx.fillText(name, (p.x-2), (p.y-3));
+  ctx.restore();
+}
+
+function drawObstacle(ob){
+  if(ob.type==='pot'){
+    // pot base
+    fillPixel(ob.x, ob.y+6, ob.w, ob.h-6, '#8b4a2c');
+    // plant
+    fillPixel(ob.x+2, ob.y, 4,6, '#2d7a65');
+    fillPixel(ob.x+1, ob.y+2, 6,2, '#49a06f');
+    // little flower
+    fillPixel(ob.x+3, ob.y-1, 1,1, '#ff5c8d');
+  } else {
+    // bush
+    fillPixel(ob.x, ob.y+6, ob.w, ob.h-6, '#4a8b3a');
+    fillPixel(ob.x+1, ob.y+2, ob.w-2, 4, '#2d7a65');
+    fillPixel(ob.x+2, ob.y+0, ob.w-4, 2, '#49a06f');
+    // small berries
+    fillPixel(ob.x+2, ob.y+3, 1,1, '#ff5c8d');
+  }
+}
+
+function update(){
+  tick++;
+  // spawn obstacles occasionally
+  if(running && tick % Math.max(60, 90 - Math.floor(score/50)) === 0){
+    spawnObstacle();
+  }
+
+  // update obstacles
+  for(let i=obstacles.length-1;i>=0;i--){
+    obstacles[i].x -= speed;
+    if(obstacles[i].x + obstacles[i].w < -20) obstacles.splice(i,1);
+  }
+
+  // update player physics
+  if(!player.grounded || player.vy !== 0){
+    player.vy += GRAVITY;
+    player.y += player.vy;
+    if(player.y + player.h >= G_HEIGHT - 6){
+      player.y = G_HEIGHT - 6 - player.h;
+      player.vy = 0;
+      player.grounded = true;
+    } else {
+      player.grounded = false;
+    }
+  }
+
+  // collision detection (AABB)
+  for(const ob of obstacles){
+    if(player.x < ob.x + ob.w -1 && player.x + player.w > ob.x +1 && player.y < ob.y + ob.h && player.y + player.h > ob.y){
+      // hit
+      endGame();
+      return;
+    }
+  }
+
+  // increase score when running
+  if(running){
+    if(tick % 6 === 0) score++;
+    // slowly ramp up speed
+    if(tick % 600 === 0) speed += 0.25;
+    document.getElementById('score').textContent = score;
+  }
+}
+
+function draw(){
+  clear();
+  drawClouds();
+  // distant hills
+  fillPixel(0, G_HEIGHT-22, G_WIDTH, 18, '#b7f1c8');
+  // flowers and small decorations
+  for(let i=0;i<6;i++){
+    const fx = (i*80 + (tick*0.5))%G_WIDTH;
+    fillPixel(fx, G_HEIGHT-9, 1,3, '#ff5c8d');
+  }
+  drawGround();
+
+  // draw obstacles
+  for(const ob of obstacles){
+    drawObstacle(ob);
+  }
+
+  drawPlayer();
+}
+
+let rafId;
+function loop(){
+  update();
+  draw();
+  rafId = requestAnimationFrame(loop);
+}
+
+function startGame(){
+  // reset
+  obstacles = [];
+  score = 0;
+  speed = 2;
+  tick = 0;
+  player.y = G_HEIGHT - player.h - 6;
+  player.vy = 0;
+  player.grounded = true;
+  running = true;
+  document.getElementById('startScreen').style.display = 'none';
+  cancelAnimationFrame(rafId);
+  loop();
+}
+
+function endGame(){
+  running = false;
+  cancelAnimationFrame(rafId);
+  // show start screen with score
+  const screen = document.getElementById('startScreen');
+  screen.style.display = 'flex';
+  screen.querySelector('.card div').textContent = 'GAME OVER — SCORE: ' + score;
+  // leave start button to restart
+}
+
+function jump(){
+  if(!running){ startGame(); return; }
+  if(player.grounded){
+    player.vy = JUMP_V;
+    player.grounded = false;
+  }
+}
+
+// Input
+window.addEventListener('keydown', (e)=>{
+  if(e.code === 'Space' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    jump();
+  }
+});
+
+// tap/click
+canvas.addEventListener('pointerdown', (e)=>{ jump(); });
+document.getElementById('startBtn').addEventListener('click', ()=>{ startGame(); });
+
+// initial draw
+(function init(){
+  // scale canvas for crisp pixel look
+  canvas.style.width = canvas.width + 'px';
+  canvas.style.height = canvas.height + 'px';
+  // draw first frame
+  draw();
+})();
+
+// accessibility note: restart on double-tap of start area
+</script>
+</body>
+</html>
